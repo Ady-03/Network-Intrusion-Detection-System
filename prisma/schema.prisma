@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Topology {
+  id        Int           @id @default(autoincrement())
+  name      String        @db.VarChar(191)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  nodes     NetworkNode[]
+  edges     NetworkEdge[]
+  alerts    Alert[]
+}
+
+model NetworkNode {
+  id         Int      @id @default(autoincrement())
+  nodeId     String   @db.VarChar(191)
+  label      String   @db.VarChar(191)
+  ip         String   @db.VarChar(191)
+  type       String   @db.VarChar(191)
+  x          Float
+  y          Float
+  topology   Topology @relation(fields: [topologyId], references: [id])
+  topologyId Int
+}
+
+model NetworkEdge {
+  id         Int      @id @default(autoincrement())
+  edgeId     String   @db.VarChar(191)
+  source     String   @db.VarChar(191)
+  target     String   @db.VarChar(191)
+  suspicious Boolean  @default(false)
+  topology   Topology @relation(fields: [topologyId], references: [id])
+  topologyId Int
+}
+
+model Alert {
+  id         Int      @id @default(autoincrement())
+  type       String   @db.VarChar(191)
+  message    String   @db.Text
+  severity   String   @db.VarChar(191)
+  srcIp      String   @db.VarChar(191)
+  dstIp      String   @db.VarChar(191)
+  createdAt  DateTime @default(now())
+  topology   Topology @relation(fields: [topologyId], references: [id])
+  topologyId Int
+}
+
+model FirewallRule {
+  id          Int      @id @default(autoincrement())
+  srcIp       String   @db.VarChar(191)
+  dstIp       String   @db.VarChar(191)
+  protocol    String   @db.VarChar(191) @default("ANY")
+  action      String   @db.VarChar(191) @default("BLOCK")
+  description String   @db.VarChar(191) @default("")
+  createdAt   DateTime @default(now())
+}

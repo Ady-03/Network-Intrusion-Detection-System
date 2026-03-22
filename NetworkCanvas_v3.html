@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NIDS — Network Canvas</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap');
+
+  :root {
+    --bg:        #060d1a;
+    --panel:     #0b1628;
+    --border:    #1a2e4a;
+    --accent:    #00e5ff;
+    --accent2:   #ff4d6d;
+    --accent3:   #39ff14;
+    --text:      #c8d8e8;
+    --muted:     #4a6080;
+    --node-pc:   #0d47a1;
+    --node-srv:  #4a148c;
+    --node-rtr:  #1b5e20;
+    --node-fw:   #bf360c;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Exo 2', sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  header .logo {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.1rem;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-shadow: 0 0 12px var(--accent);
+  }
+  header .logo span { color: var(--accent2); }
+  .status-pill {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: .7rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--accent3);
+    color: var(--accent3);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+  .spacer { flex: 1; }
+
+  .stat {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: .75rem;
+    color: var(--muted);
+  }
+  .stat b { color: var(--accent); }
+
+  /* ── Main layout ── */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  aside {
+    width: 220px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .sidebar-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section h3 {
+    font-size: .65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .node-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Exo 2', sans-serif;
+    font-size: .8rem;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .node-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,229,255,.04); }
+  .node-btn .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .action-btn {
+    width: 100%;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: .75rem;
+    cursor: pointer;
+    transition: all .2s;
+    text-align: left;
+  }
+  .action-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  .action-btn.danger:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  .clear-btn {
+    border-color: #333;
+    color: var(--muted);
+  }
+  .clear-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  /* ── Canvas ── */
+  .canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse at 20% 30%, rgba(0,229,255,.04) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 70%, rgba(255,77,109,.03) 0%, transparent 60%),
+      var(--bg);
+  }
+
+  /* grid dots */
+  .canvas-wrap::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle, rgba(255,255,255,.06) 1px, transparent 1px);
+    background-size: 30px 30px;
+    pointer-events: none;
+  }
+
+  svg#canvas {
+    width: 100%; height: 100%;
+    cursor: crosshair;
+  }
+
+  /* edges */
+  .link {
+    stroke: var(--border);
+    stroke-width: 2;
+    transition: stroke .3s;
+  }
+  .link.active { stroke: var(--accent); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--accent)); }
+  .link.suspicious { stroke: var(--accent2); stroke-width: 2.5; filter: drop-shadow(0 0 6px var(--accent2)); animation: flicker 1s infinite; }
+  @keyframes flicker { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+  /* nodes */
+  .node-group { cursor: grab; }
+  .node-group:active { cursor: grabbing; }
+
+  .node-circle {
+    stroke-width: 2;
+    transition: all .2s;
+    filter: drop-shadow(0 0 6px currentColor);
+  }
+  .node-group:hover .node-circle { stroke-width: 3; }
+  .node-group.selected .node-circle { stroke-width: 3; }
+
+  .node-label {
+    fill: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+  }
+  .node-type-label {
+    fill: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .node-icon {
+    font-size: 16px;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  /* packet animation */
+  .packet {
+    r: 5;
+    fill: var(--accent3);
+    filter: drop-shadow(0 0 6px var(--accent3));
+  }
+  .packet.hostile {
+    fill: var(--accent2);
+    filter: drop-shadow(0 0 8px var(--accent2));
+  }
+
+  /* ── Right info panel ── */
+  .info-panel {
+    width: 220px;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .info-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-section h3 {
+    font-size: .65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: .75rem;
+    margin-bottom: 5px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  .info-row .label { color: var(--muted); }
+  .info-row .val { color: var(--accent); }
+
+  .alert-item {
+    padding: 6px 8px;
+    border-radius: 4px;
+    border-left: 3px solid var(--accent2);
+    background: rgba(255,77,109,.06);
+    margin-bottom: 6px;
+    font-size: .7rem;
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--text);
+    animation: slideIn .3s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:none} }
+  .alert-item .time { color: var(--muted); font-size: .65rem; }
+
+  .no-alerts {
+    font-size: .75rem;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    text-align: center;
+    padding: 10px 0;
+  }
+
+  /* ── Bottom bar ── */
+  footer {
+    padding: 6px 20px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: .7rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  footer span b { color: var(--accent); }
+
+  /* mode indicator */
+  .mode-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: .7rem;
+    font-family: 'Share Tech Mono', monospace;
+    font-weight: 600;
+  }
+  .mode-badge.add { background: rgba(0,229,255,.15); color: var(--accent); }
+  .mode-badge.connect { background: rgba(57,255,20,.15); color: var(--accent3); }
+  .mode-badge.delete { background: rgba(255,77,109,.15); color: var(--accent2); }
+
+  .help-tip {
+    font-size: .7rem;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    padding: 8px 10px;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<header>
+  <div class="logo">N<span>IDS</span> // NETWORK CANVAS</div>
+  <div class="status-pill">● MONITORING</div>
+  <div class="status-pill" id="socketStatus" style="border-color:var(--muted);color:var(--muted);">◌ CONNECTING</div>
+  <div class="spacer"></div>
+  <div class="stat">NODES: <b id="nodeCount">0</b></div>
+  <div class="stat">EDGES: <b id="edgeCount">0</b></div>
+  <div class="stat">ALERTS: <b id="alertCount">0</b></div>
+  <div class="stat">ANOMALIES: <b id="anomalyCount" style="color:var(--accent2)">0</b></div>
+  <div class="stat" id="modeDisplay"><span class="mode-badge add">ADD NODE</span></div>
+</header>
+
+<!-- ── MAIN ── -->
+<div class="main">
+
+  <!-- LEFT SIDEBAR -->
+  <aside>
+    <div class="sidebar-section">
+      <h3>Add Device</h3>
+      <button class="node-btn" onclick="setNodeType('PC')">
+        <span class="dot" style="background:#1565c0"></span> PC / Workstation
+      </button>
+      <button class="node-btn" onclick="setNodeType('SERVER')">
+        <span class="dot" style="background:#6a1b9a"></span> Server
+      </button>
+      <button class="node-btn" onclick="setNodeType('ROUTER')">
+        <span class="dot" style="background:#2e7d32"></span> Router
+      </button>
+      <button class="node-btn" onclick="setNodeType('FIREWALL')">
+        <span class="dot" style="background:#d84315"></span> Firewall
+      </button>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Actions</h3>
+      <button class="action-btn" onclick="setMode('connect')">🔗 Connect Nodes</button>
+      <button class="action-btn" onclick="setMode('delete')">🗑 Delete Node</button>
+      <button class="action-btn" onclick="sendPacket()">📦 Send Packet</button>
+      <button class="action-btn" onclick="simulateAttack()">⚠️ Simulate Attack</button>
+      <button class="action-btn clear-btn" onclick="clearAll()">✕ Clear Canvas</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Database</h3>
+      <button class="action-btn" onclick="saveTopology()" id="saveBtn">💾 Save Network</button>
+      <button class="action-btn" onclick="loadTopology()" id="loadBtn">📂 Load Network</button>
+      <div id="dbStatus" style="font-size:.65rem;font-family:'Share Tech Mono',monospace;color:var(--muted);margin-top:6px;text-align:center;"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Hint</h3>
+      <div class="help-tip">
+        1. Pick a device type above<br>
+        2. Click canvas to place it<br>
+        3. Use Connect to draw edges<br>
+        4. Send Packet → BFS shortest path<br>
+        5. Simulate Attack → evasive detour<br>
+        6. Right panel shows hop analysis
+      </div>
+    </div>
+  </aside>
+
+  <!-- CANVAS -->
+  <div class="canvas-wrap">
+    <svg id="canvas"></svg>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="info-panel">
+    <div class="info-section">
+      <h3>Path Analysis</h3>
+      <div id="nodeInfo">
+        <div class="no-alerts">Send a packet to see BFS analysis</div>
+      </div>
+    </div>
+    <div class="info-section" style="flex:1;overflow-y:auto;">
+      <h3>Live Alerts</h3>
+      <div id="alertList">
+        <div class="no-alerts">No alerts yet</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <span>WEEK 3 — LIVE BACKEND</span>
+  <span>PACKETS SENT: <b id="packetCount">0</b></span>
+  <span>INTRUSIONS: <b id="intrusionCount">0</b></span>
+  <span>ANOMALIES: <b id="anomalyCount">0</b></span>
+  <span style="margin-left:auto;">NIT Hamirpur · ECE · NIDS Project</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────
+//  CONFIG — change this if your server runs on a different port
+// ─────────────────────────────────────────
+const API_URL = 'http://localhost:3001';
+let currentTopologyId = null;  // tracks the last saved/loaded topology
+
+// ─────────────────────────────────────────
+//  SOCKET.IO — connect to backend
+// ─────────────────────────────────────────
+const socket = io(API_URL);
+
+socket.on('connect', () => {
+  console.log('Socket connected:', socket.id);
+  const pill = document.getElementById('socketStatus');
+  pill.textContent = '● LIVE';
+  pill.style.borderColor = 'var(--accent3)';
+  pill.style.color = 'var(--accent3)';
+});
+
+socket.on('disconnect', () => {
+  const pill = document.getElementById('socketStatus');
+  pill.textContent = '○ OFFLINE';
+  pill.style.borderColor = 'var(--accent2)';
+  pill.style.color = 'var(--accent2)';
+});
+
+// Live alert from server — pushed whenever ANY client triggers attack
+socket.on('alert', (data) => {
+  pushAlert(data.type, data.message, data.severity);
+  if (data.isAnomaly) {
+    anomalyCount++;
+    document.getElementById('anomalyCount').textContent = anomalyCount;
+  }
+});
+
+// ─────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────
+let nodes = [], edges = [], nodeIdCounter = 0, edgeIdCounter = 0;
+let mode = 'add';        // add | connect | delete
+let nodeType = 'PC';
+let connectFirst = null;
+let selectedNode = null;
+let packetCount = 0, intrusionCount = 0, anomalyCount = 0;
+const alerts = [];
+
+const NODE_COLORS = {
+  PC:       { fill: '#0d2a6e', stroke: '#2979ff', icon: '💻' },
+  SERVER:   { fill: '#2a0a5e', stroke: '#aa00ff', icon: '🖥' },
+  ROUTER:   { fill: '#0a3d12', stroke: '#00e676', icon: '📡' },
+  FIREWALL: { fill: '#5d1a00', stroke: '#ff6d00', icon: '🛡' },
+};
+
+// ─────────────────────────────────────────
+//  D3 SETUP
+// ─────────────────────────────────────────
+const svg = d3.select('#canvas');
+let W = 0, H = 0;
+
+function resize() {
+  const wrap = document.querySelector('.canvas-wrap');
+  W = wrap.clientWidth;
+  H = wrap.clientHeight;
+  svg.attr('width', W).attr('height', H);
+}
+resize();
+window.addEventListener('resize', () => { resize(); render(); });
+
+// Groups (order matters for z-index)
+const edgeGroup = svg.append('g').attr('class','edges');
+const nodeGroup = svg.append('g').attr('class','nodes');
+
+// Canvas click → place node
+svg.on('click', function(event) {
+  if (mode !== 'add') return;
+  const [x, y] = d3.pointer(event);
+  addNode(x, y);
+});
+
+// ─────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  connectFirst = null;
+  svg.style('cursor', m === 'add' ? 'crosshair' : m === 'connect' ? 'cell' : 'not-allowed');
+  const badges = { add:'add', connect:'connect', delete:'delete' };
+  document.getElementById('modeDisplay').innerHTML =
+    `<span class="mode-badge ${badges[m]}">${m.toUpperCase()} MODE</span>`;
+  render();
+}
+
+function setNodeType(t) {
+  nodeType = t;
+  mode = 'add';
+  setMode('add');
+}
+
+function addNode(x, y) {
+  const id = 'N' + (++nodeIdCounter);
+  const typeLabel = { PC:'PC', SERVER:'SRV', ROUTER:'RTR', FIREWALL:'FW' }[nodeType];
+  nodes.push({ id, type: nodeType, label: `${typeLabel}-${nodeIdCounter}`, x, y, ip: randomIP() });
+  updateStats(); render();
+}
+
+function randomIP() {
+  return `192.168.${rnd(0,5)}.${rnd(1,254)}`;
+}
+function rnd(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+
+function clearAll() {
+  nodes = []; edges = []; connectFirst = null; selectedNode = null;
+  updateStats(); render(); showNodeInfo(null);
+}
+
+// ─────────────────────────────────────────
+//  RENDER
+// ─────────────────────────────────────────
+function render() {
+  // ── Edges ──
+  const link = edgeGroup.selectAll('.link').data(edges, d => d.id);
+
+  link.enter().append('line')
+    .attr('class','link')
+    .merge(link)
+    .attr('x1', d => getNode(d.source).x)
+    .attr('y1', d => getNode(d.source).y)
+    .attr('x2', d => getNode(d.target).x)
+    .attr('y2', d => getNode(d.target).y)
+    .classed('suspicious', d => d.suspicious);
+
+  link.exit().remove();
+
+  // ── Nodes ──
+  const grp = nodeGroup.selectAll('.node-group').data(nodes, d => d.id);
+
+  const enter = grp.enter().append('g')
+    .attr('class','node-group')
+    .attr('transform', d => `translate(${d.x},${d.y})`)
+    .call(d3.drag()
+      .on('start', dragStart)
+      .on('drag',  dragged)
+      .on('end',   dragEnd))
+    .on('click', (event, d) => {
+      event.stopPropagation();
+      if (mode === 'connect') handleConnect(d);
+      else if (mode === 'delete') deleteNode(d);
+      else { selectedNode = d; showNodeInfo(d); render(); }
+    });
+
+  enter.append('circle')
+    .attr('class','node-circle')
+    .attr('r', 24)
+    .attr('fill', d => NODE_COLORS[d.type].fill)
+    .attr('stroke', d => NODE_COLORS[d.type].stroke);
+
+  enter.append('text')
+    .attr('class','node-icon')
+    .attr('y', 1)
+    .text(d => NODE_COLORS[d.type].icon);
+
+  enter.append('text')
+    .attr('class','node-label')
+    .attr('y', 38);
+
+  enter.append('text')
+    .attr('class','node-type-label')
+    .attr('y', 49);
+
+  // update
+  const all = enter.merge(grp);
+  all.attr('transform', d => `translate(${d.x},${d.y})`)
+     .classed('selected', d => selectedNode && d.id === selectedNode.id);
+  all.select('.node-label').text(d => d.label);
+  all.select('.node-type-label').text(d => d.ip);
+  all.select('.node-circle')
+     .attr('fill', d => NODE_COLORS[d.type].fill)
+     .attr('stroke', d => NODE_COLORS[d.type].stroke);
+
+  grp.exit().remove();
+
+  // connect highlight
+  nodeGroup.selectAll('.node-group')
+    .select('.node-circle')
+    .attr('stroke-dasharray', d => connectFirst && connectFirst.id === d.id ? '5,3' : null);
+}
+
+// ─────────────────────────────────────────
+//  DRAG
+// ─────────────────────────────────────────
+function dragStart(event, d) {
+  // Always allow raising — dragging is independent of interaction mode
+  d3.select(this).raise();
+}
+function dragged(event, d) {
+  // Always allow repositioning nodes regardless of current mode
+  d.x = Math.max(30, Math.min(W-30, event.x));
+  d.y = Math.max(30, Math.min(H-30, event.y));
+  render();
+}
+function dragEnd(event, d) {}
+
+// ─────────────────────────────────────────
+//  CONNECT
+// ─────────────────────────────────────────
+function handleConnect(d) {
+  if (!connectFirst) {
+    connectFirst = d;
+    render();
+    return;
+  }
+  if (connectFirst.id === d.id) { connectFirst = null; render(); return; }
+  const exists = edges.some(e =>
+    (e.source === connectFirst.id && e.target === d.id) ||
+    (e.source === d.id && e.target === connectFirst.id)
+  );
+  if (!exists) {
+    edges.push({ id: `E${++edgeIdCounter}`, source: connectFirst.id, target: d.id, suspicious: false });
+  }
+  connectFirst = null;
+  updateStats(); render();
+}
+
+// ─────────────────────────────────────────
+//  DELETE
+// ─────────────────────────────────────────
+function deleteNode(d) {
+  nodes = nodes.filter(n => n.id !== d.id);
+  edges = edges.filter(e => e.source !== d.id && e.target !== d.id);
+  if (selectedNode && selectedNode.id === d.id) { selectedNode = null; showNodeInfo(null); }
+  updateStats(); render();
+}
+
+function getNode(id) { return nodes.find(n => n.id === id) || { x:0, y:0 }; }
+
+// ─────────────────────────────────────────
+//  PACKET ANIMATION
+// ─────────────────────────────────────────
+async function sendPacket() {
+  if (nodes.length < 2 || edges.length === 0) {
+    pushAlert('ERROR', 'Need at least 2 connected nodes', 'low'); return;
+  }
+  try {
+    const res  = await fetch(`${API_URL}/api/simulate/packet`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ nodes, edges, topologyId: currentTopologyId }),
+    });
+    const data = await res.json();
+    if (data.error) { pushAlert('ERROR', data.error, 'low'); return; }
+
+    animatePacket(data.actualPath, false);
+    packetCount++;
+    document.getElementById('packetCount').textContent = packetCount;
+    showPathInfo(data.actualPath, data.bfsPath);
+  } catch (err) {
+    pushAlert('ERROR', 'Cannot reach server — running offline BFS', 'low');
+    // Fallback to local BFS if server is down
+    const src = nodes[rnd(0, nodes.length-1)];
+    const dst = nodes.filter(n => n.id !== src.id)[rnd(0, nodes.length-2)];
+    const path = bfs(src.id, dst.id);
+    if (path) { animatePacket(path, false); packetCount++; document.getElementById('packetCount').textContent = packetCount; }
+  }
+}
+
+function simulateAttack() {
+  if (nodes.length < 2 || edges.length === 0) {
+    pushAlert('ERROR', 'Need at least 2 connected nodes', 'low'); return;
+  }
+  const src  = nodes[rnd(0, nodes.length - 1)];
+  const dsts = nodes.filter(n => n.id !== src.id);
+  const dst  = dsts[rnd(0, dsts.length - 1)];
+
+  const bfsPath    = bfs(src.id, dst.id);
+  const attackPath = evasivePath(src.id, dst.id);
+
+  if (!attackPath || attackPath.length < 2) { pushAlert('WARN', 'No attack path found', 'low'); return; }
+
+  // Mark edges suspicious
+  for (let i = 0; i < attackPath.length - 1; i++) {
+    const e = edges.find(e =>
+      (e.source === attackPath[i].id && e.target === attackPath[i+1].id) ||
+      (e.source === attackPath[i+1].id && e.target === attackPath[i].id)
+    );
+    if (e) { e.suspicious = true; setTimeout(() => { e.suspicious = false; render(); }, 4000); }
+  }
+  render();
+
+  animatePacket(attackPath, true);
+  intrusionCount++;
+  packetCount++;
+  document.getElementById('packetCount').textContent = packetCount;
+  document.getElementById('intrusionCount').textContent = intrusionCount;
+
+  // Anomaly: attack path is longer than BFS shortest
+  const bfsLen    = bfsPath ? bfsPath.length - 1 : null;
+  const attackLen = attackPath.length - 1;
+  const isAnomaly = bfsLen !== null && attackLen > bfsLen;
+
+  if (isAnomaly) {
+    anomalyCount++;
+    document.getElementById('anomalyCount').textContent = anomalyCount;
+    pushAlert('INTRUSION', `${src.ip} → ${dst.ip} | ${attackLen} hops vs BFS optimal ${bfsLen} — EVASIVE ROUTE`, 'high');
+  } else {
+    pushAlert('INTRUSION', `${src.ip} → ${dst.ip} | Attack on shortest path`, 'high');
+  }
+  showPathInfo(attackPath, bfsPath);
+}
+
+// ─────────────────────────────────────────
+//  BFS — TRUE SHORTEST PATH
+//  Returns an array of node objects from src to dst,
+//  or null if no path exists.
+// ─────────────────────────────────────────
+function bfs(srcId, dstId) {
+  if (srcId === dstId) return [getNode(srcId)];
+
+  // Build adjacency map from current edges
+  const adj = {};
+  nodes.forEach(n => { adj[n.id] = []; });
+  edges.forEach(e => {
+    if (adj[e.source]) adj[e.source].push(e.target);
+    if (adj[e.target]) adj[e.target].push(e.source);
+  });
+
+  // Standard BFS with parent tracking for path reconstruction
+  const visited = new Set([srcId]);
+  const parent  = { [srcId]: null };
+  const queue   = [srcId];
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (cur === dstId) {
+      // Reconstruct path by walking parent pointers back to src
+      const path = [];
+      let node = dstId;
+      while (node !== null) {
+        path.unshift(nodes.find(n => n.id === node));
+        node = parent[node];
+      }
+      return path;
+    }
+    for (const neighbour of (adj[cur] || [])) {
+      if (!visited.has(neighbour)) {
+        visited.add(neighbour);
+        parent[neighbour] = cur;
+        queue.push(neighbour);
+      }
+    }
+  }
+
+  return null; // No path exists (disconnected graph)
+}
+
+// ─────────────────────────────────────────
+//  EVASIVE PATH — deliberate detour for attack simulation
+//  Finds a path that avoids the BFS-optimal intermediate nodes,
+//  making it longer and therefore anomalous.
+// ─────────────────────────────────────────
+function evasivePath(srcId, dstId) {
+  const bfsPath = bfs(srcId, dstId);
+  if (!bfsPath) return null;
+
+  // Collect intermediate nodes on the optimal path (not src/dst)
+  const optimalMiddle = new Set(
+    bfsPath.slice(1, -1).map(n => n.id)
+  );
+
+  // Run BFS but treat optimal-middle nodes as blocked (evasion)
+  const adj = {};
+  nodes.forEach(n => { adj[n.id] = []; });
+  edges.forEach(e => {
+    if (adj[e.source]) adj[e.source].push(e.target);
+    if (adj[e.target]) adj[e.target].push(e.source);
+  });
+
+  const visited = new Set([srcId]);
+  const parent  = { [srcId]: null };
+  const queue   = [srcId];
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (cur === dstId) {
+      const path = [];
+      let node = dstId;
+      while (node !== null) {
+        path.unshift(nodes.find(n => n.id === node));
+        node = parent[node];
+      }
+      return path;
+    }
+    for (const neighbour of (adj[cur] || [])) {
+      // Skip optimal-middle nodes to force a detour (but allow dst)
+      if (!visited.has(neighbour) && (!optimalMiddle.has(neighbour) || neighbour === dstId)) {
+        visited.add(neighbour);
+        parent[neighbour] = cur;
+        queue.push(neighbour);
+      }
+    }
+  }
+
+  // Fallback: evasion not possible, use any BFS path
+  return bfsPath;
+}
+
+// ─────────────────────────────────────────
+//  PATH INFO PANEL — shows BFS analysis in right panel
+// ─────────────────────────────────────────
+function showPathInfo(actualPath, bfsPath) {
+  const el = document.getElementById('nodeInfo');
+  const actualHops = actualPath.length - 1;
+  const bfsHops    = bfsPath ? bfsPath.length - 1 : actualHops;
+  const anomaly    = actualHops > bfsHops;
+
+  const pathStr = actualPath.map(n => n.label).join(' → ');
+  const bfsStr  = bfsPath ? bfsPath.map(n => n.label).join(' → ') : pathStr;
+
+  el.innerHTML = `
+    <div class="info-row">
+      <span class="label">SRC</span>
+      <span class="val">${actualPath[0].ip}</span>
+    </div>
+    <div class="info-row">
+      <span class="label">DST</span>
+      <span class="val">${actualPath[actualPath.length-1].ip}</span>
+    </div>
+    <div class="info-row">
+      <span class="label">ACTUAL HOPS</span>
+      <span class="val" style="color:${anomaly ? 'var(--accent2)' : 'var(--accent3)'}">${actualHops}</span>
+    </div>
+    <div class="info-row">
+      <span class="label">BFS OPTIMAL</span>
+      <span class="val">${bfsHops}</span>
+    </div>
+    <div class="info-row">
+      <span class="label">STATUS</span>
+      <span class="val" style="color:${anomaly ? 'var(--accent2)' : 'var(--accent3)'}">
+        ${anomaly ? '⚠ ANOMALY' : '✓ NORMAL'}
+      </span>
+    </div>
+    <div style="margin-top:8px;font-size:.68rem;font-family:'Share Tech Mono',monospace;color:var(--muted);line-height:1.6;">
+      <div style="margin-bottom:4px;">ACTUAL PATH:</div>
+      <div style="color:${anomaly ? 'var(--accent2)' : 'var(--accent)'};">${pathStr}</div>
+      ${bfsPath && anomaly ? `<div style="margin-top:6px;margin-bottom:4px;">BFS SHORTEST:</div>
+      <div style="color:var(--accent3);">${bfsStr}</div>` : ''}
+    </div>
+  `;
+}
+
+function animatePacket(path, hostile) {
+  const dot = svg.append('circle')
+    .attr('class', hostile ? 'packet hostile' : 'packet')
+    .attr('cx', path[0].x).attr('cy', path[0].y).attr('r', 5);
+
+  let step = 0;
+  function hop() {
+    if (step >= path.length - 1) { dot.remove(); return; }
+    const from = path[step], to = path[step+1];
+    dot.transition().duration(500).ease(d3.easeLinear)
+      .attr('cx', to.x).attr('cy', to.y)
+      .on('end', () => { step++; hop(); });
+  }
+  hop();
+}
+
+// ─────────────────────────────────────────
+//  NODE INFO
+// ─────────────────────────────────────────
+function showNodeInfo(d) {
+  const el = document.getElementById('nodeInfo');
+  if (!d) { el.innerHTML = '<div class="no-alerts">No node selected</div>'; return; }
+  const connCount = edges.filter(e => e.source === d.id || e.target === d.id).length;
+  el.innerHTML = `
+    <div class="info-row"><span class="label">ID</span><span class="val">${d.id}</span></div>
+    <div class="info-row"><span class="label">TYPE</span><span class="val">${d.type}</span></div>
+    <div class="info-row"><span class="label">LABEL</span><span class="val">${d.label}</span></div>
+    <div class="info-row"><span class="label">IP</span><span class="val">${d.ip}</span></div>
+    <div class="info-row"><span class="label">CONNECTIONS</span><span class="val">${connCount}</span></div>
+  `;
+}
+
+// ─────────────────────────────────────────
+//  ALERTS
+// ─────────────────────────────────────────
+function pushAlert(type, msg, severity) {
+  const now = new Date().toLocaleTimeString();
+  alerts.unshift({ type, msg, severity, time: now });
+  if (alerts.length > 10) alerts.pop();
+  renderAlerts();
+  document.getElementById('alertCount').textContent = alerts.length;
+}
+
+function renderAlerts() {
+  const el = document.getElementById('alertList');
+  if (alerts.length === 0) { el.innerHTML = '<div class="no-alerts">No alerts yet</div>'; return; }
+  el.innerHTML = alerts.map(a => `
+    <div class="alert-item">
+      <div><b>${a.type}</b> · ${a.severity.toUpperCase()}</div>
+      <div>${a.msg}</div>
+      <div class="time">${a.time}</div>
+    </div>
+  `).join('');
+}
+
+// ─────────────────────────────────────────
+//  STATS
+// ─────────────────────────────────────────
+function updateStats() {
+  document.getElementById('nodeCount').textContent = nodes.length;
+  document.getElementById('edgeCount').textContent = edges.length;
+}
+
+// ─────────────────────────────────────────
+//  SAVE / LOAD TOPOLOGY — MySQL via backend
+// ─────────────────────────────────────────
+async function saveTopology() {
+  if (nodes.length === 0) { pushAlert('WARN', 'Nothing to save', 'low'); return; }
+  const btn = document.getElementById('saveBtn');
+  const status = document.getElementById('dbStatus');
+  btn.textContent = '⏳ Saving...';
+  btn.disabled = true;
+  try {
+    const res  = await fetch(`${API_URL}/api/network/save`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name: 'NIDS Canvas', nodes, edges }),
+    });
+    const data = await res.json();
+    currentTopologyId = data.topologyId;
+    status.textContent = `Saved as ID ${data.topologyId}`;
+    status.style.color = 'var(--accent3)';
+    pushAlert('INFO', `Topology saved to MySQL (ID: ${data.topologyId})`, 'low');
+  } catch (err) {
+    status.textContent = 'Save failed';
+    status.style.color = 'var(--accent2)';
+    pushAlert('ERROR', 'Could not reach server to save', 'low');
+  } finally {
+    btn.textContent = '💾 Save Network';
+    btn.disabled = false;
+  }
+}
+
+async function loadTopology() {
+  const id = prompt('Enter topology ID to load:');
+  if (!id || isNaN(id)) return;
+  const btn = document.getElementById('loadBtn');
+  const status = document.getElementById('dbStatus');
+  btn.textContent = '⏳ Loading...';
+  btn.disabled = true;
+  try {
+    const res  = await fetch(`${API_URL}/api/network/${id}`);
+    const data = await res.json();
+    if (data.error) { pushAlert('ERROR', data.error, 'low'); return; }
+
+    nodes = data.nodes;
+    edges = data.edges;
+    nodeIdCounter = nodes.length;
+    currentTopologyId = data.topologyId;
+    updateStats(); render();
+    status.textContent = `Loaded ID ${data.topologyId}`;
+    status.style.color = 'var(--accent3)';
+    pushAlert('INFO', `Loaded "${data.name}" from MySQL (${nodes.length} nodes, ${edges.length} edges)`, 'low');
+  } catch (err) {
+    status.textContent = 'Load failed';
+    status.style.color = 'var(--accent2)';
+    pushAlert('ERROR', 'Could not reach server to load', 'low');
+  } finally {
+    btn.textContent = '📂 Load Network';
+    btn.disabled = false;
+  }
+}
+
+// ─────────────────────────────────────────
+//  INIT — seed a small demo network
+// ─────────────────────────────────────────
+function seedDemo() {
+  const cx = W/2, cy = H/2;
+  nodes = [
+    { id:'N1', type:'FIREWALL', label:'FW-1',  x: cx,      y: cy-160, ip:'10.0.0.1' },
+    { id:'N2', type:'ROUTER',   label:'RTR-1', x: cx-160,  y: cy-40,  ip:'192.168.0.1' },
+    { id:'N3', type:'ROUTER',   label:'RTR-2', x: cx+160,  y: cy-40,  ip:'192.168.1.1' },
+    { id:'N4', type:'SERVER',   label:'SRV-1', x: cx,      y: cy+80,  ip:'192.168.0.10' },
+    { id:'N5', type:'PC',       label:'PC-1',  x: cx-260,  y: cy+80,  ip:'192.168.0.20' },
+    { id:'N6', type:'PC',       label:'PC-2',  x: cx+260,  y: cy+80,  ip:'192.168.1.20' },
+  ];
+  nodeIdCounter = 6;
+  edges = [
+    { id:'E1', source:'N1', target:'N2', suspicious:false },
+    { id:'E2', source:'N1', target:'N3', suspicious:false },
+    { id:'E3', source:'N2', target:'N4', suspicious:false },
+    { id:'E4', source:'N2', target:'N5', suspicious:false },
+    { id:'E5', source:'N3', target:'N6', suspicious:false },
+    { id:'E6', source:'N4', target:'N3', suspicious:false },
+  ];
+  updateStats(); render();
+  pushAlert('INFO', 'Demo network loaded — BFS anomaly detection active', 'low');
+}
+
+setTimeout(seedDemo, 100);
+
+// Load last 10 alerts from MySQL on page load
+fetch(`${API_URL}/api/alerts`)
+  .then(r => r.json())
+  .then(data => {
+    if (!Array.isArray(data)) return;
+    data.slice(0, 10).forEach(a => {
+      alerts.push({ type: a.type, msg: a.message, severity: a.severity, time: new Date(a.createdAt).toLocaleTimeString() });
+    });
+    renderAlerts();
+    document.getElementById('alertCount').textContent = alerts.length;
+  })
+  .catch(() => {}); // silently skip if server not running
+</script>
+</body>
+</html>
