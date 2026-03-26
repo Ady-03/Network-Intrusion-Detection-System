@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Network {
+  id        Int      @id @default(autoincrement())
+  name      String
+  nodes     Json
+  edges     Json
+  createdAt DateTime @default(now())
+  alerts    Alert[]
+}
+
+model Alert {
+  id        Int      @id @default(autoincrement())
+  type      String
+  severity  String
+  message   String
+  path      String
+  networkId Int?
+  network   Network? @relation(fields: [networkId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model FirewallRule {
+  id        Int      @id @default(autoincrement())
+  action    String
+  sourceIP  String
+  port      Int
+  priority  Int
+  createdAt DateTime @default(now())
+}
