@@ -10,14 +10,6 @@ This project allows users to build and analyze a custom network topology directl
 
 ---
 
-## Live Demo
-
-🔗 https://nids-demo.onrender.com
-
-> Note: The server may take a few seconds to start if hosted on a free tier.
-
----
-
 ## Screenshots
 
 ![Dashboard](screenshots/dashboard.png)
